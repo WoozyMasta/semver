@@ -263,6 +263,95 @@ func TestSort(t *testing.T) {
 	}
 }
 
+// Checks that ParseNoCanon matches Parse on fields,
+// but does not build Canonical (Canon() == "" and String() == "").
+func TestParseNoCanon_EqualsParseFields(t *testing.T) {
+	for _, tt := range tests {
+		v1, ok1 := Parse(tt.in)
+		v2, ok2 := ParseNoCanon(tt.in)
+
+		if ok1 != ok2 {
+			t.Fatalf("ok mismatch for %q: Parse=%v ParseNoCanon=%v", tt.in, ok1, ok2)
+		}
+		if !ok1 {
+			// обе невалидны — ок
+			continue
+		}
+
+		// Числовые поля и метаданные совпадают
+		if v1.Major != v2.Major || v1.Minor != v2.Minor || v1.Patch != v2.Patch {
+			t.Fatalf("numeric mismatch for %q: Parse(%d.%d.%d) vs NoCanon(%d.%d.%d)",
+				tt.in, v1.Major, v1.Minor, v1.Patch, v2.Major, v2.Minor, v2.Patch)
+		}
+		if v1.Prerelease != v2.Prerelease {
+			t.Fatalf("prerelease mismatch for %q: %q vs %q", tt.in, v1.Prerelease, v2.Prerelease)
+		}
+		if v1.Build != v2.Build {
+			t.Fatalf("build mismatch for %q: %q vs %q", tt.in, v1.Build, v2.Build)
+		}
+		if v2.Canon() != "" || v2.String() != "" {
+			t.Fatalf("ParseNoCanon must not build Canonical for %q: got Canon=%q String=%q",
+				tt.in, v2.Canon(), v2.String())
+		}
+		// Original должен сохраняться как есть
+		if v2.Original != tt.in {
+			t.Fatalf("Original mismatch for %q: got %q", tt.in, v2.Original)
+		}
+	}
+}
+
+// Invalid versions: ParseNoCanon should also return ok=false.
+func TestParseNoCanon_Invalid(t *testing.T) {
+	for _, tt := range tests {
+		if tt.out != "" {
+			continue
+		}
+		_, ok := ParseNoCanon(tt.in)
+		if ok {
+			t.Fatalf("ParseNoCanon(%q) must be invalid (ok=false)", tt.in)
+		}
+	}
+}
+
+// Compare consistency: comparison after Parse and ParseNoCanon is the same.
+func TestParseNoCanon_CompareConsistency(t *testing.T) {
+	// возьмём только валидные входы
+	vals := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		if tt.out != "" {
+			vals = append(vals, tt.in)
+		}
+	}
+	for i := range vals {
+		for j := range vals {
+			vp1, _ := Parse(vals[i])
+			vp2, _ := Parse(vals[j])
+			vn1, _ := ParseNoCanon(vals[i])
+			vn2, _ := ParseNoCanon(vals[j])
+
+			if gotP, gotN := vp1.Compare(vp2), vn1.Compare(vn2); gotP != gotN {
+				t.Fatalf("Compare mismatch %q vs %q: Parse=%d ParseNoCanon=%d",
+					vals[i], vals[j], gotP, gotN)
+			}
+		}
+	}
+}
+
+var benchInputs = []string{
+	"1.2.3",
+	"v10.20.30",
+	"2.0.0-rc.1",
+	"3.4.5-alpha.7",
+	"6.7.8+build.11",
+	"9.9.9-beta",
+	"0.0.1",
+	"1.0.0+meta-pre.sha.256a",
+	"4.5.6-zzz",
+	"7.8.9-1",
+}
+
+var sinkInt int // чтобы so that the compiler does not throw out calls
+
 // BenchmarkCompare benchmarks Compare() between two versions
 // that differ only in build metadata (should compare equal).
 func BenchmarkCompare(b *testing.B) {
@@ -273,4 +362,32 @@ func BenchmarkCompare(b *testing.B) {
 			b.Fatalf("bad compare")
 		}
 	}
+}
+
+func BenchmarkParse(b *testing.B) {
+	b.ReportAllocs()
+	n := 0
+	for i := 0; i < b.N; i++ {
+		for _, s := range benchInputs {
+			v, ok := Parse(s)
+			if ok {
+				n += v.Major
+			}
+		}
+	}
+	sinkInt = n
+}
+
+func BenchmarkParseNoCanon(b *testing.B) {
+	b.ReportAllocs()
+	n := 0
+	for i := 0; i < b.N; i++ {
+		for _, s := range benchInputs {
+			v, ok := ParseNoCanon(s)
+			if ok {
+				n += v.Major
+			}
+		}
+	}
+	sinkInt = n
 }
