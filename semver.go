@@ -37,6 +37,18 @@ type Semver struct {
 // The input may include or omit a leading "v".
 // Returns (Semver, true) if valid, otherwise (Semver{Valid:false}, false).
 func Parse(s string) (Semver, bool) {
+	return parseImpl(s, true) // build canonical
+}
+
+// ParseNoCanon parses a SemVer string like Parse but does not construct
+// the canonical string form. This minimizes allocations. The returned
+// Semver still has Original, numeric fields and Prerelease/Build set.
+// Canon() and String() will be empty unless you call Parse instead.
+func ParseNoCanon(s string) (Semver, bool) {
+	return parseImpl(s, false) // no canonical
+}
+
+func parseImpl(s string, buildCanonical bool) (Semver, bool) {
 	orig := s
 	p, ok := parseInternal(s)
 	if !ok {
@@ -47,9 +59,12 @@ func Parse(s string) (Semver, bool) {
 	min, _ := strconv.Atoi(p.Minor)
 	pat, _ := strconv.Atoi(p.Patch)
 
-	canon := "v" + p.Major + "." + p.Minor + "." + p.Patch
-	if p.Prerelease != "" {
-		canon += p.Prerelease // already starts with '-'
+	var canon string
+	if buildCanonical {
+		canon = "v" + p.Major + "." + p.Minor + "." + p.Patch
+		if p.Prerelease != "" {
+			canon += p.Prerelease // already starts with '-'
+		}
 	}
 
 	return Semver{
@@ -65,7 +80,9 @@ func Parse(s string) (Semver, bool) {
 }
 
 // IsValid reports whether the Semver was successfully parsed.
-func (v Semver) IsValid() bool { return v.Valid }
+func (v Semver) IsValid() bool {
+	return v.Valid
+}
 
 // Compare compares v with w according to semantic version precedence.
 // Returns -1 if v < w, 0 if v == w, +1 if v > w.
@@ -119,7 +136,9 @@ func (v Semver) Compare(w Semver) int {
 
 // Canon returns the canonical string form "vMAJOR.MINOR.PATCH[-PRERELEASE]",
 // with build metadata stripped. Empty if invalid.
-func (v Semver) Canon() string { return v.Canonical }
+func (v Semver) Canon() string {
+	return v.Canonical
+}
 
 // MajorStr returns the major-only string, e.g. "v2".
 // Empty if invalid.
