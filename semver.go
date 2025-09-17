@@ -7,6 +7,18 @@ type Semver struct {
 	// Original the raw input string (may be without "v")
 	Original string
 
+	// Prerelease optional pre-release part (without leading '-')
+	// Zero-copy slice of Original.
+	Prerelease string
+
+	// Build optional build metadata (without leading '+')
+	// Zero-copy slice of Original.
+	Build string
+
+	// cursor caches bounds of pre/build within raw = Original[vOffset:].
+	// The bounds do NOT include the leading '-' or '+'.
+	cursor cursor
+
 	// Major numeric component (normalized, no leading zeros)
 	Major int
 
@@ -16,23 +28,11 @@ type Semver struct {
 	// Patch numeric component (normalized, no leading zeros)
 	Patch int
 
-	// Prerelease optional pre-release part (without leading '-')
-	// Zero-copy slice of Original.
-	Prerelease string
-
-	// Build optional build metadata (without leading '+')
-	// Zero-copy slice of Original.
-	Build string
-
 	// Flags auxiliary flags affecting parsing or comparison behavior.
 	Flags Flags
 
 	// Valid indicates successful parsing
 	Valid bool
-
-	// cursor caches bounds of pre/build within raw = Original[vOffset:].
-	// The bounds do NOT include the leading '-' or '+'.
-	cursor cursor
 }
 
 type cursor struct {

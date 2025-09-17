@@ -157,7 +157,7 @@ func TestPrerelease(t *testing.T) {
 		var want string
 		if tt.out != "" {
 			if i := strings.Index(tt.out, "-"); i >= 0 {
-				want = tt.out[i+1:] // без '-'
+				want = tt.out[i+1:] // without '-'
 			}
 		}
 		if got := v.Prerelease; got != want {
@@ -173,7 +173,7 @@ func TestBuild(t *testing.T) {
 		var want string
 		if tt.out != "" {
 			if i := strings.Index(tt.in, "+"); i >= 0 {
-				want = tt.in[i+1:] // без '+'
+				want = tt.in[i+1:] // without '+'
 			}
 		}
 		if got := v.Build; got != want {
