@@ -74,7 +74,7 @@ func TestParseAndCanon(t *testing.T) {
 		if !v.Valid {
 			t.Fatalf("Parse(%q) -> Valid=false, want true", tt.in)
 		}
-		if got := v.Canon(); got != tt.out {
+		if got := v.Canonical(); got != tt.out {
 			t.Errorf("Canon(%q) = %q, want %q", tt.in, got, tt.out)
 		}
 	}
@@ -88,7 +88,7 @@ func TestParseNoVAndCanon(t *testing.T) {
 		if !ok || !v.Valid {
 			t.Fatalf("Parse(%q) -> invalid, want valid", tt.in)
 		}
-		if got := v.Canon(); got != tt.out {
+		if got := v.Canonical(); got != tt.out {
 			t.Errorf("Canon(%q) = %q, want %q", tt.in, got, tt.out)
 		}
 	}
@@ -160,7 +160,7 @@ func TestPrerelease(t *testing.T) {
 				want = tt.out[i+1:] // без '-'
 			}
 		}
-		if got := v.Pre(); got != want {
+		if got := v.Prerelease; got != want {
 			t.Errorf("Pre(%q) = %q, want %q", tt.in, got, want)
 		}
 	}
@@ -176,7 +176,7 @@ func TestBuild(t *testing.T) {
 				want = tt.in[i+1:] // без '+'
 			}
 		}
-		if got := v.BuildMeta(); got != want {
+		if got := v.Build; got != want {
 			t.Errorf("BuildMeta(%q) = %q, want %q", tt.in, got, want)
 		}
 	}
@@ -263,80 +263,6 @@ func TestSort(t *testing.T) {
 	}
 }
 
-// Checks that ParseNoCanon matches Parse on fields,
-// but does not build Canonical (Canon() == "" and String() == "").
-func TestParseNoCanon_EqualsParseFields(t *testing.T) {
-	for _, tt := range tests {
-		v1, ok1 := Parse(tt.in)
-		v2, ok2 := ParseNoCanon(tt.in)
-
-		if ok1 != ok2 {
-			t.Fatalf("ok mismatch for %q: Parse=%v ParseNoCanon=%v", tt.in, ok1, ok2)
-		}
-		if !ok1 {
-			// обе невалидны — ок
-			continue
-		}
-
-		// Числовые поля и метаданные совпадают
-		if v1.Major != v2.Major || v1.Minor != v2.Minor || v1.Patch != v2.Patch {
-			t.Fatalf("numeric mismatch for %q: Parse(%d.%d.%d) vs NoCanon(%d.%d.%d)",
-				tt.in, v1.Major, v1.Minor, v1.Patch, v2.Major, v2.Minor, v2.Patch)
-		}
-		if v1.Prerelease != v2.Prerelease {
-			t.Fatalf("prerelease mismatch for %q: %q vs %q", tt.in, v1.Prerelease, v2.Prerelease)
-		}
-		if v1.Build != v2.Build {
-			t.Fatalf("build mismatch for %q: %q vs %q", tt.in, v1.Build, v2.Build)
-		}
-		if v2.Canon() != "" || v2.String() != "" {
-			t.Fatalf("ParseNoCanon must not build Canonical for %q: got Canon=%q String=%q",
-				tt.in, v2.Canon(), v2.String())
-		}
-		// Original должен сохраняться как есть
-		if v2.Original != tt.in {
-			t.Fatalf("Original mismatch for %q: got %q", tt.in, v2.Original)
-		}
-	}
-}
-
-// Invalid versions: ParseNoCanon should also return ok=false.
-func TestParseNoCanon_Invalid(t *testing.T) {
-	for _, tt := range tests {
-		if tt.out != "" {
-			continue
-		}
-		_, ok := ParseNoCanon(tt.in)
-		if ok {
-			t.Fatalf("ParseNoCanon(%q) must be invalid (ok=false)", tt.in)
-		}
-	}
-}
-
-// Compare consistency: comparison after Parse and ParseNoCanon is the same.
-func TestParseNoCanon_CompareConsistency(t *testing.T) {
-	// возьмём только валидные входы
-	vals := make([]string, 0, len(tests))
-	for _, tt := range tests {
-		if tt.out != "" {
-			vals = append(vals, tt.in)
-		}
-	}
-	for i := range vals {
-		for j := range vals {
-			vp1, _ := Parse(vals[i])
-			vp2, _ := Parse(vals[j])
-			vn1, _ := ParseNoCanon(vals[i])
-			vn2, _ := ParseNoCanon(vals[j])
-
-			if gotP, gotN := vp1.Compare(vp2), vn1.Compare(vn2); gotP != gotN {
-				t.Fatalf("Compare mismatch %q vs %q: Parse=%d ParseNoCanon=%d",
-					vals[i], vals[j], gotP, gotN)
-			}
-		}
-	}
-}
-
 var benchInputs = []string{
 	"1.2.3",
 	"v10.20.30",
@@ -350,7 +276,9 @@ var benchInputs = []string{
 	"7.8.9-1",
 }
 
-var sinkInt int // чтобы so that the compiler does not throw out calls
+// that the compiler does not throw out calls
+var sinkInt int
+var sinkStr string
 
 // BenchmarkCompare benchmarks Compare() between two versions
 // that differ only in build metadata (should compare equal).
@@ -378,16 +306,119 @@ func BenchmarkParse(b *testing.B) {
 	sinkInt = n
 }
 
-func BenchmarkParseNoCanon(b *testing.B) {
+// Benchmark full Compare() on versions that *hit* comparePrerelease path.
+func BenchmarkCompare_PreRelease(b *testing.B) {
+	cases := []struct {
+		name string
+		a, b string
+	}{
+		{"Equal", "1.2.3-alpha.1", "1.2.3-alpha.1"},              // equal prerelease
+		{"NumOrderShortVsLong", "1.2.3-beta.2", "1.2.3-beta.11"}, // numeric vs numeric
+		{"NumericVsAlpha", "1.2.3-alpha.1", "1.2.3-alpha.beta"},  // numeric < non-numeric
+		{"Lexical", "1.2.3-alpha.beta", "1.2.3-alpha.gamma"},     // lexical ASCII
+		{"DeepChain", "1.2.3-a.10.b.2", "1.2.3-a.2.b.10"},        // deeper chain
+		{"FirstIdentDiff", "1.2.3-alpha", "1.2.3-beta"},          // different first identifier
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			v1, _ := Parse(tc.a)
+			v2, _ := Parse(tc.b)
+			b.ReportAllocs()
+			b.ResetTimer()
+			sum := 0
+			for i := 0; i < b.N; i++ {
+				sum += v1.Compare(v2)
+			}
+			sinkInt = sum
+		})
+	}
+}
+
+// Benchmark the internal comparePrerelease() directly (isolated).
+// Note: current implementation allocates due to "-" + a trick.
+func BenchmarkCompare_PreRelease_Direct(b *testing.B) {
+	cases := []struct {
+		name string
+		a, b string
+	}{
+		{"Equal", "alpha.1", "alpha.1"},
+		{"NumOrderShortVsLong", "beta.2", "beta.11"},
+		{"NumericVsAlpha", "alpha.1", "alpha.beta"},
+		{"Lexical", "alpha.beta", "alpha.gamma"},
+		{"DeepChain", "a.10.b.2", "a.2.b.10"},
+		{"FirstIdentDiff", "alpha", "beta"},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			sum := 0
+			for i := 0; i < b.N; i++ {
+				sum += comparePrerelease(tc.a, tc.b)
+			}
+			sinkInt = sum
+		})
+	}
+}
+
+// Build canonical on a plain release (build metadata stripped).
+func BenchmarkCanonical_Release(b *testing.B) {
+	v, _ := Parse("1.2.3+meta.whatever")
 	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkStr = v.Canonical()
+	}
+}
+
+// Build canonical when prerelease is present.
+func BenchmarkCanonical_Prerelease(b *testing.B) {
+	v, _ := Parse("1.2.3-alpha.1")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkStr = v.Canonical()
+	}
+}
+
+// Longer prerelease chain stresses byte appends.
+func BenchmarkCanonical_LongPrerelease(b *testing.B) {
+	v, _ := Parse("10.20.30-alpha.beta.1.2.3.4.5.6.7.8.9-rc.1+build.123") // build is stripped
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkStr = v.Canonical()
+	}
+}
+
+// String() should be identical to Canonical() by implementation.
+func BenchmarkString_AliasOfCanonical(b *testing.B) {
+	v, _ := Parse("3.4.5-rc.2+build.9")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkStr = v.String()
+	}
+}
+
+// End-to-end cost: Parse + Canonical in each iteration.
+func BenchmarkParseThenCanonical(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
 	n := 0
 	for i := 0; i < b.N; i++ {
 		for _, s := range benchInputs {
-			v, ok := ParseNoCanon(s)
+			v, ok := Parse(s)
 			if ok {
-				n += v.Major
+				sinkStr = v.Canonical()
+				// consume a bit to avoid over-optimizations
+				n += len(sinkStr)
 			}
 		}
 	}
-	sinkInt = n
+	if n == 42 { // make sure n is used
+		b.Log(n)
+	}
 }

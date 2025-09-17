@@ -1,18 +1,11 @@
 package semver
 
-import (
-	"sort"
-	"strconv"
-	"strings"
-)
+import "strconv"
 
-// Semver represents a parsed semantic version string
+// Semver represents a semantic version parsed from an input string.
 type Semver struct {
 	// Original the raw input string (may be without "v")
 	Original string
-
-	// Canonical normalized form "vMAJOR.MINOR.PATCH[-PRERELEASE]" (build metadata stripped)
-	Canonical string
 
 	// Major numeric component (normalized, no leading zeros)
 	Major int
@@ -24,65 +17,31 @@ type Semver struct {
 	Patch int
 
 	// Prerelease optional pre-release part (without leading '-')
+	// Zero-copy slice of Original.
 	Prerelease string
 
 	// Build optional build metadata (without leading '+')
+	// Zero-copy slice of Original.
 	Build string
+
+	// Flags auxiliary flags affecting parsing or comparison behavior.
+	Flags Flags
 
 	// Valid indicates successful parsing
 	Valid bool
+
+	// cursor caches bounds of pre/build within raw = Original[vOffset:].
+	// The bounds do NOT include the leading '-' or '+'.
+	cursor cursor
 }
 
-// Parse parses a version string into a Semver struct.
-// The input may include or omit a leading "v".
-// Returns (Semver, true) if valid, otherwise (Semver{Valid:false}, false).
-func Parse(s string) (Semver, bool) {
-	return parseImpl(s, true) // build canonical
-}
-
-// ParseNoCanon parses a SemVer string like Parse but does not construct
-// the canonical string form. This minimizes allocations. The returned
-// Semver still has Original, numeric fields and Prerelease/Build set.
-// Canon() and String() will be empty unless you call Parse instead.
-func ParseNoCanon(s string) (Semver, bool) {
-	return parseImpl(s, false) // no canonical
-}
-
-func parseImpl(s string, buildCanonical bool) (Semver, bool) {
-	orig := s
-	p, ok := parseInternal(s)
-	if !ok {
-		return Semver{Original: orig, Valid: false}, false
-	}
-
-	maj, _ := strconv.Atoi(p.Major)
-	min, _ := strconv.Atoi(p.Minor)
-	pat, _ := strconv.Atoi(p.Patch)
-
-	var canon string
-	if buildCanonical {
-		canon = "v" + p.Major + "." + p.Minor + "." + p.Patch
-		if p.Prerelease != "" {
-			canon += p.Prerelease // already starts with '-'
-		}
-	}
-
-	return Semver{
-		Original:   orig,
-		Canonical:  canon,
-		Major:      maj,
-		Minor:      min,
-		Patch:      pat,
-		Prerelease: strings.TrimPrefix(p.Prerelease, "-"),
-		Build:      strings.TrimPrefix(p.Build, "+"),
-		Valid:      true,
-	}, true
+type cursor struct {
+	preStart, preEnd     int // bounds in raw (no '-' in slice)
+	buildStart, buildEnd int // bounds in raw (no '+')
 }
 
 // IsValid reports whether the Semver was successfully parsed.
-func (v Semver) IsValid() bool {
-	return v.Valid
-}
+func (v Semver) IsValid() bool { return v.Valid }
 
 // Compare compares v with w according to semantic version precedence.
 // Returns -1 if v < w, 0 if v == w, +1 if v > w.
@@ -122,103 +81,118 @@ func (v Semver) Compare(w Semver) int {
 	}
 
 	// prerelease: empty > any pre
+	vHasPre := v.Flags&FlagHasPre != 0
+	wHasPre := w.Flags&FlagHasPre != 0
+
 	switch {
-	case v.Prerelease == "" && w.Prerelease == "":
+	case !vHasPre && !wHasPre:
 		return 0
-	case v.Prerelease == "" && w.Prerelease != "":
+	case !vHasPre && wHasPre:
 		return 1
-	case v.Prerelease != "" && w.Prerelease == "":
+	case vHasPre && !wHasPre:
 		return -1
 	default:
 		return comparePrerelease(v.Prerelease, w.Prerelease)
 	}
 }
 
-// Canon returns the canonical string form "vMAJOR.MINOR.PATCH[-PRERELEASE]",
-// with build metadata stripped. Empty if invalid.
-func (v Semver) Canon() string {
-	return v.Canonical
+// Canonical returns "vMAJOR.MINOR.PATCH[-PRERELEASE]".
+func (v *Semver) Canonical() string {
+	if !v.Valid {
+		return ""
+	}
+
+	b := make([]byte, 0, 16+len(v.Prerelease))
+	b = append(b, 'v')
+	b = strconv.AppendInt(b, int64(v.Major), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Minor), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Patch), 10)
+	if v.Flags&FlagHasPre != 0 {
+		b = append(b, '-')
+		b = append(b, v.Prerelease...)
+	}
+
+	return string(b)
 }
 
-// MajorStr returns the major-only string, e.g. "v2".
-// Empty if invalid.
+// String returns "vMAJOR.MINOR.PATCH[-PRERELEASE]".
+func (v *Semver) String() string {
+	return v.Canonical()
+}
+
+// Full returns "vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]" for display/logging.
+func (v *Semver) Full() string {
+	if !v.Valid {
+		return ""
+	}
+
+	b := make([]byte, 0, 16+len(v.Prerelease)+1+len(v.Build))
+	b = append(b, 'v')
+	b = strconv.AppendInt(b, int64(v.Major), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Minor), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Patch), 10)
+	if v.Flags&FlagHasPre != 0 {
+		b = append(b, '-')
+		b = append(b, v.Prerelease...)
+	}
+	if v.Flags&FlagHasBuild != 0 {
+		b = append(b, '+')
+		b = append(b, v.Build...)
+	}
+
+	return string(b)
+}
+
+// MajorStr returns "vMAJOR". Empty if invalid.
 func (v Semver) MajorStr() string {
-	if !v.Valid {
+	if v.Flags&FlagHasMajor == 0 {
 		return ""
 	}
 
-	return "v" + strconv.Itoa(v.Major)
+	b := make([]byte, 0, 8)
+	b = append(b, 'v')
+	b = strconv.AppendInt(b, int64(v.Major), 10)
+
+	return string(b)
 }
 
-// MajorMinorStr returns the major.minor string, e.g. "v2.1".
-// Empty if invalid.
+// MajorMinorStr returns "vMAJOR.MINOR". Empty if invalid.
 func (v Semver) MajorMinorStr() string {
-	if !v.Valid {
+	if v.Flags&(FlagHasMajor|FlagHasMinor) == 0 {
 		return ""
 	}
 
-	return "v" + strconv.Itoa(v.Major) + "." + strconv.Itoa(v.Minor)
+	b := make([]byte, 0, 12)
+	b = append(b, 'v')
+	b = strconv.AppendInt(b, int64(v.Major), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Minor), 10)
+
+	return string(b)
 }
 
-// Pre returns the prerelease identifier (without leading '-'), or "".
-func (v Semver) Pre() string {
-	return v.Prerelease
-}
-
-// BuildMeta returns the build metadata (without leading '+'), or "".
-func (v Semver) BuildMeta() string {
-	return v.Build
-}
-
-// String implements fmt.Stringer. It returns the canonical form.
-func (v Semver) String() string {
-	return v.Canonical
-}
-
-// List is a slice of Semver values that implements sort.Interface.
-// Elements are ordered by semantic version precedence with a
-// lexicographic tie-breaker on Original.
-type List []Semver
-
-// Len implements sort.Interface.
-func (ls List) Len() int {
-	return len(ls)
-}
-
-// Swap implements sort.Interface.
-func (ls List) Swap(i, j int) {
-	ls[i], ls[j] = ls[j], ls[i]
-}
-
-// Less implements sort.Interface.
-// It orders by semantic version precedence; if two values compare equal
-// it falls back to lexicographic order of Original (or Canon if empty).
-func (ls List) Less(i, j int) bool {
-	c := ls[i].Compare(ls[j])
-	if c != 0 {
-		return c < 0
+// ReleaseStr returns "vMAJOR.MINOR.PATCH". Empty if invalid.
+func (v Semver) ReleaseStr() string {
+	if v.Flags&(FlagHasMajor|FlagHasMinor|FlagHasPatch) == 0 {
+		return ""
 	}
 
-	ai := ls[i].Original
-	if ai == "" {
-		ai = ls[i].Canon()
-	}
+	b := make([]byte, 0, 16)
+	b = append(b, 'v')
+	b = strconv.AppendInt(b, int64(v.Major), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Minor), 10)
+	b = append(b, '.')
+	b = strconv.AppendInt(b, int64(v.Patch), 10)
 
-	aj := ls[j].Original
-	if aj == "" {
-		aj = ls[j].Canon()
-	}
-
-	return ai < aj
-}
-
-// Sort sorts the list in ascending semver order.
-func (ls List) Sort() {
-	sort.Sort(ls)
+	return string(b)
 }
 
 // Max returns the greater of two Semver values.
-// Invalid values are always smaller than valid ones.
 func (v Semver) Max(w Semver) Semver {
 	if v.Compare(w) >= 0 {
 		return v
