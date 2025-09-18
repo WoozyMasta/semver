@@ -8,7 +8,7 @@ import (
 )
 
 // tests is based on the original table from x/mod/semver.
-// "out" is the expected Canon() result, or empty string if the version is invalid.
+// "out" is the expected Canonical() result, or empty string if the version is invalid.
 var tests = []struct {
 	in  string
 	out string
@@ -178,6 +178,26 @@ func TestBuild(t *testing.T) {
 		}
 		if got := v.Build; got != want {
 			t.Errorf("BuildMeta(%q) = %q, want %q", tt.in, got, want)
+		}
+	}
+}
+
+func TestBuildOriginal_SemVer(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"-", ""},
+		{"someversion", ""},
+		{"v1", "1.0.0"},
+		{"1.2.3", "1.2.3"},
+		{"1.2.3+meta", "1.2.3+meta"},
+		{"v1.2.3-rc.1", "1.2.3-rc.1"},
+		{"V1.2.3-rc.1+z", "1.2.3-rc.1+z"},
+	}
+	for _, tc := range cases {
+		v, _ := Parse(tc.in)
+		if got := v.SemVer(); got != tc.want {
+			t.Errorf("SemVer() %q = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

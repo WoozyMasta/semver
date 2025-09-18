@@ -128,6 +128,43 @@ func (v *Semver) String() string {
 	return v.Canonical()
 }
 
+// SemVer renders "MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]".
+func (v *Semver) SemVer() string {
+	if !v.Valid {
+		return ""
+	}
+
+	preExtra := 0
+	if v.Flags&FlagHasPre != 0 && v.Prerelease != "" {
+		preExtra = 1 + len(v.Prerelease) // '-' + pre
+	}
+	preBuild := 0
+	if v.Flags&FlagHasBuild != 0 && v.Build != "" {
+		preBuild = 1 + len(v.Build) // '+' + build
+	}
+
+	total := digits10(v.Major) + 1 + digits10(v.Minor) + 1 + digits10(v.Patch) + preExtra + preBuild
+
+	var b strings.Builder
+	b.Grow(total)
+	writeInt(&b, v.Major)
+	b.WriteByte('.')
+	writeInt(&b, v.Minor)
+	b.WriteByte('.')
+	writeInt(&b, v.Patch)
+
+	if preExtra > 0 {
+		b.WriteByte('-')
+		b.WriteString(v.Prerelease)
+	}
+	if preBuild > 0 {
+		b.WriteByte('+')
+		b.WriteString(v.Build)
+	}
+
+	return b.String()
+}
+
 // Full renders "([v|V]?)MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]".
 // If preserve is true, it always uses lowercase 'v' prefix.
 // If preserve is false, it preserves the original prefix style:
