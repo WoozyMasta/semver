@@ -37,7 +37,9 @@ type Semver struct {
 }
 
 // IsValid reports whether the Semver was successfully parsed.
-func (v Semver) IsValid() bool { return v.Valid }
+func (v Semver) IsValid() bool {
+	return v.Valid
+}
 
 // Compare compares v with w according to SemVer precedence.
 // Returns -1 if v < w, 0 if v == w, +1 if v > w.
@@ -126,7 +128,7 @@ func (v *Semver) String() string {
 	return v.Canonical()
 }
 
-// BuildOriginal renders "([v|V]?)MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]".
+// Full renders "([v|V]?)MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]".
 // If preserve is true, it always uses lowercase 'v' prefix.
 // If preserve is false, it preserves the original prefix style:
 //   - if Original started with 'v' or 'V' — uses that exact rune;

@@ -58,10 +58,15 @@ NextPrerelease (increments numeric tail; default base "rc"):
 	z2, _ = z2.NextPrerelease("")     // "v1.2.3-rc.1"
 	_, _ = z1.Canonical(), z2.Canonical()
 
-Full():
+Full, Canonical, ReleaseStr, MajorMinorStr, MajorStr
 
 	u, _ := Parse("V1.2.3-rc.1+meta")
-	_ = u.Full(true)  // "v1.2.3-rc.1+meta" (force 'v')
-	_ = u.Full(false) // "V1.2.3-rc.1+meta" (preserve original 'V')
+
+	_ := u.Full(true)      // "v1.2.3-rc.1+meta" (force 'v')
+	_ := u.Full(false)     // "V1.2.3-rc.1+meta" (preserve original 'V')
+	_ := u.Canonical()     // "v1.2.3rc.1"
+	_ := u.ReleaseStr()    // "v1.2.3"
+	_ := u.MajorMinorStr() // "v1.2"
+	_ := u.MajorStr()      // "v1"
 */
 package semver
