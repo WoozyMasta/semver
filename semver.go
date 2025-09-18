@@ -1,23 +1,24 @@
 package semver
 
-import "strconv"
+import (
+	"strings"
+)
 
 // Semver represents a semantic version parsed from an input string.
+// Prerelease and Build are zero-copy slices of Original when present.
+// Major/Minor/Patch are normalized numeric values (no leading zeros).
+// Flags expose what components were explicitly present in the input.
 type Semver struct {
 	// Original the raw input string (may be without "v")
 	Original string
 
-	// Prerelease optional pre-release part (without leading '-')
-	// Zero-copy slice of Original.
+	// Prerelease optional pre-release part (no leading '-' in the value).
+	// Zero-copy slice of Original when parsed; after mutators it may be a standalone string.
 	Prerelease string
 
-	// Build optional build metadata (without leading '+')
-	// Zero-copy slice of Original.
+	// Build optional build metadata (no leading '+' in the value).
+	// Zero-copy slice of Original when parsed; after mutators it may be a standalone string.
 	Build string
-
-	// cursor caches bounds of pre/build within raw = Original[vOffset:].
-	// The bounds do NOT include the leading '-' or '+'.
-	cursor cursor
 
 	// Major numeric component (normalized, no leading zeros)
 	Major int
@@ -35,18 +36,13 @@ type Semver struct {
 	Valid bool
 }
 
-type cursor struct {
-	preStart, preEnd     int // bounds in raw (no '-' in slice)
-	buildStart, buildEnd int // bounds in raw (no '+')
-}
-
 // IsValid reports whether the Semver was successfully parsed.
 func (v Semver) IsValid() bool { return v.Valid }
 
-// Compare compares v with w according to semantic version precedence.
+// Compare compares v with w according to SemVer precedence.
 // Returns -1 if v < w, 0 if v == w, +1 if v > w.
-// Invalid versions are always considered smaller than valid ones.
-// Build metadata is ignored for ordering.
+// Build metadata is ignored. Release (no prerelease) has higher precedence
+// than any prerelease. Invalid versions are always smaller than valid ones.
 func (v Semver) Compare(w Semver) int {
 	if !v.Valid && !w.Valid {
 		return 0
@@ -97,54 +93,97 @@ func (v Semver) Compare(w Semver) int {
 }
 
 // Canonical returns "vMAJOR.MINOR.PATCH[-PRERELEASE]".
+// Build metadata is intentionally stripped.
 func (v *Semver) Canonical() string {
 	if !v.Valid {
 		return ""
 	}
 
-	b := make([]byte, 0, 16+len(v.Prerelease))
-	b = append(b, 'v')
-	b = strconv.AppendInt(b, int64(v.Major), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Minor), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Patch), 10)
-	if v.Flags&FlagHasPre != 0 {
-		b = append(b, '-')
-		b = append(b, v.Prerelease...)
+	preExtra := 0
+	if v.Flags&FlagHasPre != 0 && v.Prerelease != "" {
+		preExtra = 1 + len(v.Prerelease) // '-' + pre
+	}
+	total := 1 + digits10(v.Major) + 1 + digits10(v.Minor) + 1 + digits10(v.Patch) + preExtra
+
+	var b strings.Builder
+	b.Grow(total)
+	b.WriteByte('v')
+	writeInt(&b, v.Major)
+	b.WriteByte('.')
+	writeInt(&b, v.Minor)
+	b.WriteByte('.')
+	writeInt(&b, v.Patch)
+	if preExtra > 0 {
+		b.WriteByte('-')
+		b.WriteString(v.Prerelease)
 	}
 
-	return string(b)
+	return b.String()
 }
 
-// String returns "vMAJOR.MINOR.PATCH[-PRERELEASE]".
+// String implements fmt.Stringer. It is identical to Canonical().
 func (v *Semver) String() string {
 	return v.Canonical()
 }
 
-// Full returns "vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]" for display/logging.
-func (v *Semver) Full() string {
+// BuildOriginal renders "([v|V]?)MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]".
+// If preserve is true, it always uses lowercase 'v' prefix.
+// If preserve is false, it preserves the original prefix style:
+//   - if Original started with 'v' or 'V' — uses that exact rune;
+//   - otherwise — no prefix at all.
+func (v *Semver) Full(preserve bool) string {
 	if !v.Valid {
 		return ""
 	}
 
-	b := make([]byte, 0, 16+len(v.Prerelease)+1+len(v.Build))
-	b = append(b, 'v')
-	b = strconv.AppendInt(b, int64(v.Major), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Minor), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Patch), 10)
-	if v.Flags&FlagHasPre != 0 {
-		b = append(b, '-')
-		b = append(b, v.Prerelease...)
-	}
-	if v.Flags&FlagHasBuild != 0 {
-		b = append(b, '+')
-		b = append(b, v.Build...)
+	// decide prefix
+	var pfx byte
+	if preserve {
+		pfx = 'v'
+	} else {
+		if v.HasV() && len(v.Original) > 0 {
+			pfx = v.Original[0]
+		} else {
+			pfx = 0 // no prefix
+		}
 	}
 
-	return string(b)
+	preExtra := 0
+	if v.Flags&FlagHasPre != 0 && v.Prerelease != "" {
+		preExtra = 1 + len(v.Prerelease) // '-' + pre
+	}
+	preBuild := 0
+	if v.Flags&FlagHasBuild != 0 && v.Build != "" {
+		preBuild = 1 + len(v.Build) // '+' + build
+	}
+
+	total := int(0)
+	if pfx != 0 {
+		total++
+	}
+	total += 1 + digits10(v.Major) + 1 + digits10(v.Minor) + 1 + digits10(v.Patch) + preExtra + preBuild
+
+	var b strings.Builder
+	b.Grow(total)
+	if pfx != 0 {
+		b.WriteByte(pfx)
+	}
+	writeInt(&b, v.Major)
+	b.WriteByte('.')
+	writeInt(&b, v.Minor)
+	b.WriteByte('.')
+	writeInt(&b, v.Patch)
+
+	if preExtra > 0 {
+		b.WriteByte('-')
+		b.WriteString(v.Prerelease)
+	}
+	if preBuild > 0 {
+		b.WriteByte('+')
+		b.WriteString(v.Build)
+	}
+
+	return b.String()
 }
 
 // MajorStr returns "vMAJOR". Empty if invalid.
@@ -153,43 +192,48 @@ func (v Semver) MajorStr() string {
 		return ""
 	}
 
-	b := make([]byte, 0, 8)
-	b = append(b, 'v')
-	b = strconv.AppendInt(b, int64(v.Major), 10)
+	var b strings.Builder
+	b.Grow(1 + digits10(v.Major))
+	b.WriteByte('v')
+	writeInt(&b, v.Major)
 
-	return string(b)
+	return b.String()
 }
 
-// MajorMinorStr returns "vMAJOR.MINOR". Empty if invalid.
+// MajorMinorStr returns "vMAJOR.MINOR".
+// Empty if invalid or MINOR wasn't present in the input.
 func (v Semver) MajorMinorStr() string {
 	if v.Flags&(FlagHasMajor|FlagHasMinor) == 0 {
 		return ""
 	}
 
-	b := make([]byte, 0, 12)
-	b = append(b, 'v')
-	b = strconv.AppendInt(b, int64(v.Major), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Minor), 10)
+	var b strings.Builder
+	b.Grow(1 + digits10(v.Major) + 1 + digits10(v.Minor))
+	b.WriteByte('v')
+	writeInt(&b, v.Major)
+	b.WriteByte('.')
+	writeInt(&b, v.Minor)
 
-	return string(b)
+	return b.String()
 }
 
-// ReleaseStr returns "vMAJOR.MINOR.PATCH". Empty if invalid.
+// ReleaseStr returns "vMAJOR.MINOR.PATCH".
+// Empty if invalid or PATCH wasn't present in the input.
 func (v Semver) ReleaseStr() string {
 	if v.Flags&(FlagHasMajor|FlagHasMinor|FlagHasPatch) == 0 {
 		return ""
 	}
 
-	b := make([]byte, 0, 16)
-	b = append(b, 'v')
-	b = strconv.AppendInt(b, int64(v.Major), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Minor), 10)
-	b = append(b, '.')
-	b = strconv.AppendInt(b, int64(v.Patch), 10)
+	var b strings.Builder
+	b.Grow(1 + digits10(v.Major) + 1 + digits10(v.Minor) + 1 + digits10(v.Patch))
+	b.WriteByte('v')
+	writeInt(&b, v.Major)
+	b.WriteByte('.')
+	writeInt(&b, v.Minor)
+	b.WriteByte('.')
+	writeInt(&b, v.Patch)
 
-	return string(b)
+	return b.String()
 }
 
 // Max returns the greater of two Semver values.
@@ -199,4 +243,58 @@ func (v Semver) Max(w Semver) Semver {
 	}
 
 	return w
+}
+
+// IsGreater reports whether the receiver v represents a semantic version that is
+// strictly greater than the provided version w according to the package's
+// comparison rules. It returns true when v.Compare(w) > 0.
+func (v Semver) IsGreater(w Semver) bool {
+	return v.Compare(w) > 0
+}
+
+// IsLower reports whether the receiver v represents a semantic version that is
+// strictly lower than the provided version w according to the package's
+// comparison rules. It returns true when v.Compare(w) < 0.
+func (v Semver) IsLower(w Semver) bool {
+	return v.Compare(w) < 0
+}
+
+// IsEqual reports whether the receiver v is equal to the provided version w
+// according to semantic version precedence rules. It returns true when v.Compare(w) == 0.
+func (v Semver) IsEqual(w Semver) bool {
+	return v.Compare(w) == 0
+}
+
+// writeInt writes a non-negative integer to the builder using a small stack buffer.
+func writeInt(b *strings.Builder, x int) {
+	// handle zero fast-path
+	if x == 0 {
+		b.WriteByte('0')
+		return
+	}
+
+	var buf [20]byte // enough for int64
+	i := len(buf)
+	u := x
+	for u > 0 {
+		i--
+		buf[i] = byte('0' + u%10)
+		u /= 10
+	}
+
+	b.Write(buf[i:])
+}
+
+// digits10 returns number of decimal digits in a non-negative integer.
+func digits10(x int) int {
+	if x == 0 {
+		return 1
+	}
+
+	n := 0
+	for u := x; u > 0; u /= 10 {
+		n++
+	}
+
+	return n
 }

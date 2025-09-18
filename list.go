@@ -17,9 +17,9 @@ func (ls List) Swap(i, j int) {
 	ls[i], ls[j] = ls[j], ls[i]
 }
 
-// Less implements sort.Interface.
-// It orders by semantic version precedence; if two values compare equal
-// it falls back to lexicographic order of Original (or Canon if empty).
+// Less orders by semantic version precedence; if two values compare equal
+// it falls back to lexicographic order of Original (or Canonical()) to
+// produce a stable, deterministic order.
 func (ls List) Less(i, j int) bool {
 	c := ls[i].Compare(ls[j])
 	if c != 0 {

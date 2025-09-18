@@ -182,6 +182,89 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+func TestBuildOriginal_StrictV(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"1.2.3-rc.1+meta", "v1.2.3-rc.1+meta"},
+		{"v1.2.3+meta", "v1.2.3+meta"},
+		{"V1.2.3", "v1.2.3"},
+	}
+	for _, tc := range cases {
+		v, _ := Parse(tc.in)
+		if got := v.Full(true); got != tc.want {
+			t.Errorf("BuildOriginal(true) %q = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestBuildOriginal_PreservePrefix(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"1.2.3+meta", "1.2.3+meta"},
+		{"v1.2.3-rc.1", "v1.2.3-rc.1"},
+		{"V1.2.3-rc.1+z", "V1.2.3-rc.1+z"},
+	}
+	for _, tc := range cases {
+		v, _ := Parse(tc.in)
+		if got := v.Full(false); got != tc.want {
+			t.Errorf("BuildOriginal(false) %q = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestFull covers various combinations of core/prerelease/build (and shorthand).
+func TestFull(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"1.2.3", "v1.2.3"},
+		{"v1.2.3", "v1.2.3"},
+		{"1.2.3-alpha.1+build.5", "v1.2.3-alpha.1+build.5"},
+		{"v1.2.3+meta", "v1.2.3+meta"},
+		{"v1.2.3-rc.1", "v1.2.3-rc.1"},
+		{"1", "v1.0.0"},   // shorthand MAJOR
+		{"1.2", "v1.2.0"}, // shorthand MAJOR.MINOR
+		{"v1-pre", ""},    // invalid: prerelease requires x.y.z
+		{"v1.2+meta", ""}, // invalid: build requires x.y.z
+		{"bad", ""},       // invalid
+	}
+
+	for _, tc := range cases {
+		v, _ := Parse(tc.in)
+		if got := v.Full(true); got != tc.want {
+			t.Errorf("Full(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestReleaseStr ensures normalized "vMAJOR.MINOR.PATCH" output.
+func TestReleaseStr(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"1.2.3", "v1.2.3"},
+		{"v1.2.3", "v1.2.3"},
+		{"1.2.3-alpha.1+build.5", "v1.2.3"},
+		{"v1.2.3+meta", "v1.2.3"},
+		{"v1.2.3-rc.1", "v1.2.3"},
+		{"1", "v1.0.0"},   // shorthand MAJOR -> normalized
+		{"1.2", "v1.2.0"}, // shorthand MAJOR.MINOR -> normalized
+		{"v1-pre", ""},    // invalid overall -> empty
+		{"bad", ""},       // invalid
+	}
+
+	for _, tc := range cases {
+		v, _ := Parse(tc.in)
+		if got := v.ReleaseStr(); got != tc.want {
+			t.Errorf("ReleaseStr(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestCompare checks that Compare() preserves the ordering
 // implied by the test table.
 func TestCompare(t *testing.T) {
@@ -366,6 +449,15 @@ func BenchmarkCompare_PreRelease_Direct(b *testing.B) {
 // Build canonical on a plain release (build metadata stripped).
 func BenchmarkCanonical_Release(b *testing.B) {
 	v, _ := Parse("1.2.3+meta.whatever")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sinkStr = v.Canonical()
+	}
+}
+
+func BenchmarkCanonical_Repeat(b *testing.B) {
+	v, _ := Parse("10.256.13370-alpha.beta.1.2.3.4.5.6.7.8.9-rc.1+build.123")
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
