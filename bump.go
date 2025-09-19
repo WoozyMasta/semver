@@ -14,7 +14,7 @@ func (v Semver) BumpPatch() (Semver, bool) {
 	nv.Prerelease, nv.Build = "", ""
 	nv.Flags |= FlagHasMajor | FlagHasMinor | FlagHasPatch
 	nv.Flags &^= (FlagHasPre | FlagHasBuild)
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -31,7 +31,7 @@ func (v Semver) BumpMinor() (Semver, bool) {
 	nv.Prerelease, nv.Build = "", ""
 	nv.Flags |= FlagHasMajor | FlagHasMinor | FlagHasPatch
 	nv.Flags &^= (FlagHasPre | FlagHasBuild)
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -48,7 +48,7 @@ func (v Semver) BumpMajor() (Semver, bool) {
 	nv.Prerelease, nv.Build = "", ""
 	nv.Flags |= FlagHasMajor | FlagHasMinor | FlagHasPatch
 	nv.Flags &^= (FlagHasPre | FlagHasBuild)
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -87,7 +87,7 @@ func (v Semver) WithPre(pre string) (Semver, bool) {
 		nv.Flags &^= FlagHasPre
 	}
 
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -124,7 +124,7 @@ func (v Semver) WithBuild(build string) (Semver, bool) {
 		nv.Flags &^= FlagHasBuild
 	}
 
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -138,7 +138,7 @@ func (v Semver) StripPre() (Semver, bool) {
 	nv := v
 	nv.Prerelease = ""
 	nv.Flags &^= FlagHasPre
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -152,7 +152,7 @@ func (v Semver) StripBuild() (Semver, bool) {
 	nv := v
 	nv.Build = ""
 	nv.Flags &^= FlagHasBuild
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
@@ -205,7 +205,7 @@ func (v Semver) NextPrerelease(base string) (Semver, bool) {
 
 	nv.Prerelease = strings.Join(parts, ".")
 	nv.Flags |= FlagHasPre
-	nv.Original = nv.Full(false)
+	nv.Original = nv.Print(PrintMaskDefault)
 
 	return nv, true
 }
